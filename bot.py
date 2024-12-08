@@ -1,134 +1,127 @@
-# Preparing the folder structure for the Lucky Draw crypto game bot project
-game_project_name = "LuckyDrawRedHatCoin"
-game_base_dir = f"/mnt/data/{game_project_name}"
-os.makedirs(game_base_dir, exist_ok=True)
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import requests
+import json
 
-# Game bot files
-game_files = {
-    f"{game_base_dir}/bot.py": """
-import random
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-import sqlite3
+# Define your CoinGecko API key
+api_key = 'YOUR_COINGECKO_API_KEY'  
 
-# Database setup
-DB_PATH = "lucky_draw.db"
+# Function to fetch cryptocurrency data from CoinGecko
+def get_crypto_data(crypto):
+    try:
+        response = requests.get(f'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids={crypto}&api_key={api_key}')
+        response.raise_for_status()
+        data = response.json()[0]
+        return data
+    except requests.exceptions.HTTPError as errh:
+        print ("Http Error:",errh)
+    except requests.exceptions.ConnectionError as errc:
+        print ("Error Connecting:",errc)
+    except requests.exceptions.Timeout as errt:
+        print ("Timeout Error:",errt)
+    except requests.exceptions.RequestException as err:
+        print ("Something went wrong",err)
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY,
-        username TEXT,
-        spins INTEGER DEFAULT 0,
-        wallet_ton REAL DEFAULT 0.0,
-        wallet_gems INTEGER DEFAULT 0,
-        wallet_redhat INTEGER DEFAULT 0,
-        wallet_usdt REAL DEFAULT 0.0,
-        wallet_token INTEGER DEFAULT 0
-    )''')
-    conn.commit()
-    conn.close()
+# Function to fetch top 10 cryptocurrencies from CoinGecko
+def get_top_cryptos():
+    try:
+        response = requests.get(f'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&sparkline=false&api_key={api_key}')
+        response.raise_for_status()
+        data = response.json()
+        return data
+    except requests.exceptions.HTTPError as errh:
+        print ("Http Error:",errh)
+    except requests.exceptions.ConnectionError as errc:
+        print ("Error Connecting:",errc)
+    except requests.exceptions.Timeout as errt:
+        print ("Timeout Error:",errt)
+    except requests.exceptions.RequestException as err:
+        print ("Something went wrong",err)
 
-# Start command
+# Function to fetch on-chain DEX pool data from CoinGecko
+def get_dex_pools(query, network, include, page=1):
+    headers = {"x-cg-pro-api-key": api_key}
+    try:
+        response = requests.get(f'https://pro-api.coingecko.com/api/v3/onchain/search/pools?query={query}&network={network}&include={include}&page={page}', headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        return data
+    except requests.exceptions.HTTPError as errh:
+        print ("Http Error:",errh)
+    except requests.exceptions.ConnectionError as errc:
+        print ("Error Connecting:",errc)
+    except requests.exceptions.Timeout as errt:
+        print ("Timeout Error:",errt)
+    except requests.exceptions.RequestException as err:
+        print ("Something went wrong",err)
+
+# Telegram command to start the bot
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)",
-              (user.id, user.username))
-    conn.commit()
-    conn.close()
+    welcome_message = 'Hello! I am your Crypto Bot. I can provide real-time data for any cryptocurrency. Use /data <crypto-name> to get started.'
+    await update.message.reply_text(welcome_message)
 
-    await update.message.reply_text(
-        f"Welcome {user.first_name}! Complete tasks to earn spins and win prizes!"
-    )
-
-# Lucky Draw spin command
-async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT spins FROM users WHERE id = ?", (user_id,))
-    result = c.fetchone()
-
-    if result and result[0] > 0:
-        # Deduct one spin and award a random prize
-        prizes = ["0.000001 TON", "5 Gems", "10 RedHat Coins", "1 USDT", "1 Token"]
-        prize = random.choice(prizes)
-        c.execute("UPDATE users SET spins = spins - 1 WHERE id = ?", (user_id,))
-        conn.commit()
-
-        # Update wallet based on prize
-        if prize == "0.000001 TON":
-            c.execute("UPDATE users SET wallet_ton = wallet_ton + 0.000001 WHERE id = ?", (user_id,))
-        elif prize == "5 Gems":
-            c.execute("UPDATE users SET wallet_gems = wallet_gems + 5 WHERE id = ?", (user_id,))
-        elif prize == "10 RedHat Coins":
-            c.execute("UPDATE users SET wallet_redhat = wallet_redhat + 10 WHERE id = ?", (user_id,))
-        elif prize == "1 USDT":
-            c.execute("UPDATE users SET wallet_usdt = wallet_usdt + 1 WHERE id = ?", (user_id,))
-        elif prize == "1 Token":
-            c.execute("UPDATE users SET wallet_token = wallet_token + 1 WHERE id = ?", (user_id,))
-        conn.commit()
-
-        await update.message.reply_text(f"Congratulations! You won {prize}!")
+# Telegram command to get the data of a cryptocurrency
+async def data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    crypto = update.message.text.split()[1]  # get the crypto name from the message
+    data = get_crypto_data(crypto)
+    if data:
+        await update.message.reply_text(f'The current price of {crypto} is ${data["current_price"]}. The price change in the last 24 hours is {data["price_change_percentage_24h"]}%.\nThe market cap is ${data["market_cap"]}.\nThe total volume in the last 24 hours is ${data["total_volume"]}.')
     else:
-        await update.message.reply_text("You don't have any spins left. Complete tasks to earn more!")
+        await update.message.reply_text(f'Sorry, I could not fetch the data for {crypto}. Please check the cryptocurrency name and try again.')
 
-    conn.close()
-
-# Check Wallet command
-async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""SELECT wallet_ton, wallet_gems, wallet_redhat, wallet_usdt, wallet_token
-                 FROM users WHERE id = ?""", (user_id,))
-    result = c.fetchone()
-    conn.close()
-
-    if result:
-        ton, gems, redhat, usdt, token = result
-        await update.message.reply_text(
-            f"Your Wallet:\n"
-            f"TON: {ton}\n"
-            f"Gems: {gems}\n"
-            f"RedHat Coins: {redhat}\n"
-            f"USDT: {usdt}\n"
-            f"Tokens: {token}"
-        )
+# Telegram command to get the highest and lowest prices of a cryptocurrency in the last 24 hours
+async def high_low(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    crypto = update.message.text.split()[1]  # get the crypto name from the message
+    data = get_crypto_data(crypto)
+    if data:
+        await update.message.reply_text(f'The highest price in the last 24 hours for {crypto} is ${data["high_24h"]}, and the lowest price is ${data["low_24h"]}.')
     else:
-        await update.message.reply_text("You don't have a wallet yet. Use /start to begin!")
+        await update.message.reply_text(f'Sorry, I could not fetch the data for {crypto}. Please check the cryptocurrency name and try again.')
 
-# Main function to start the bot
-def main() -> None:
-    init_db()
+# Telegram command to get the circulating supply and total supply of a cryptocurrency
+async def supply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    crypto = update.message.text.split()[1]  # get the crypto name from the message
+    data = get_crypto_data(crypto)
+    if data:
+        await update.message.reply_text(f'The circulating supply of {crypto} is {data["circulating_supply"]}, and the total supply is {data["total_supply"]}.')
+    else:
+        await update.message.reply_text(f'Sorry, I could not fetch the data for {crypto}. Please check the cryptocurrency name and try again.')
 
-    app = ApplicationBuilder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("spin", spin))
-    app.add_handler(CommandHandler("wallet", wallet))
+# Telegram command to get the top 10 cryptocurrencies
+async def ranks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    data = get_top_cryptos()
+    if data:
+        message = "Here are the top 10 cryptocurrencies:\n"
+        for i, crypto in enumerate(data, start=1):
+            message += f'{i}. *{crypto["name"]}* ({crypto["symbol"].upper()}):\n- Current price is ${crypto["current_price"]}\n- Market cap is ${crypto["market_cap"]}\n- Total volume in the last 24 hours is ${crypto["total_volume"]}\n\n'
+        await update.message.reply_text(message, parse_mode='Markdown')
+    else:
+        await update.message.reply_text('Sorry, I could not fetch the data for the top 10 cryptocurrencies. Please try again later.')
 
-    print("Bot is running...")
-    app.run_polling()
+# Telegram command to get the on-chain DEX pool data
+async def search_pools(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    params = update.message.text.split()[1:]  # get the parameters from the message
+    query = params[0] if len(params) > 0 else 'weth'
+    network = params[1] if len(params) > 1 else 'eth'
+    include = params[2] if len(params) > 2 else 'dex'
+    page = int(params[3]) if len(params) > 3 else 1
+    data = get_dex_pools(query, network, include, page)
+    if data and "data" in data:
+        message = f"Here are the DEX pool data for the query {query} on the network {network}:\n"
+        for i, pool in enumerate(data["data"], start=1):
+            message += f'\n{i}. Pool ID: *{pool["id"]}*\n- Pool Name: {pool["attributes"]["name"]}\n- Base Token Price (USD): ${pool["attributes"]["base_token_price_usd"]}\n- Quote Token Price (USD): ${pool["attributes"]["quote_token_price_usd"]}\n- Base Token Price (Quote Token): {pool["attributes"]["base_token_price_quote_token"]}\n- Quote Token Price (Base Token): {pool["attributes"]["quote_token_price_base_token"]}\n- Total Liquidity: ${pool["attributes"]["reserve_in_usd"]}\n- Price Change Percentage in the last 5 minutes: {pool["attributes"]["price_change_percentage"]["m5"]}%\n- Price Change Percentage in the last 1 hour: {pool["attributes"]["price_change_percentage"]["h1"]}%\n- Price Change Percentage in the last 6 hours: {pool["attributes"]["price_change_percentage"]["h6"]}%\n- Price Change Percentage in the last 24 hours: {pool["attributes"]["price_change_percentage"]["h24"]}%\n'
+        for i in range(0, len(message), 4096):
+            await update.message.reply_text(message[i:i+4096], parse_mode='Markdown')
+    else:
+        await update.message.reply_text(f'Sorry, I could not fetch the data for the query {query} on the network {network}. Please check the query and network and try again.')
 
-if __name__ == "__main__":
-    main()
-""",
-    f"{game_base_dir}/requirements.txt": """
-python-telegram-bot==20.0
-sqlite3
-""",
-    f"{game_base_dir}/README.md": """
-# LuckyDrawRedHatCoin Game
+app = ApplicationBuilder().token('YOUR_TG_BOT_TOKEN').build()
 
-A Telegram bot for a fun lucky draw game with RedHat Coins and other crypto prizes.
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("data", data))
+app.add_handler(CommandHandler("high_low", high_low))
+app.add_handler(CommandHandler("supply", supply))
+app.add_handler(CommandHandler("ranks", ranks))
+app.add_handler(CommandHandler("search_pools", search_pools))
 
-## Features
-- Spin the lucky draw to win prizes: TON, Gems, RedHat Coins, USDT, or Tokens.
-- Complete tasks to earn spins (3 spins per task).
-- Wallet system to track winnings.
-
-## Setup
-1. Install Python dependencies:
+app.run_polling()
